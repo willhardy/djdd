@@ -31,11 +31,11 @@ Configuration
 
 Your code needs to define the following:
  * requirements.txt
- * venv-debian-requirements.txt
- * src-debian-requirements.txt
+ * venv-debian-requirements.txt (required debian packages for virtualenv packages)
+ * src-debian-requirements.txt (required debian packages for src)
  * When running the script, you will need to provide arguments to communicate:
-   - the software's name
-   - the software's variant (for multitenancy)
+   - the software's name (used in package and script names, keep it short, no spaces etc)
+   - the software's variant (optional, for multitenancy)
    - the version hash to be built
    - the build directory (see below for creating the build directory)
 
@@ -61,8 +61,8 @@ To create the required packages run eg `django-deb-deploy --build-directory /pat
 For convenience you can add `django_deb_deploy` to the `INSTALLED_PACKAGES` setting in your development settings and use `./manage.py deb_deploy` instead.
 
 
-Requirements package
-====================
+virtualenv package
+==================
 A package is generated that contains a virtualenv that is required for this version.
 
   * a hash is generated from the `requirements.txt` file, after it is sorted and de-commented
@@ -72,10 +72,16 @@ A package is generated that contains a virtualenv that is required for this vers
 
 This package will contain the (binary) files already in place for the debian machine. It will probably be large, but will not need to be installed for every upgrade, only the upgrades where the `requirements.txt` file has substantively changed. Because the python libraries will be compiled, you must build on the same machine type and debian install as the target system.
 
+
 Source package
 ==============
+The source is installed separately to the virtualenv because it is updated more often that the virtualenv package. This helps keep updates smaller, but means that the source needs to be included in the PYTHONPATH for it to be accessible.
+
 The version number/hash of this chekout is used for the debian package name, eg `{software name}-src-{hash}`.
-The source code is checked out to eg `/usr/lib/{software name}-src/{hash}/`
+The source code is checked out to eg `/usr/lib/{software name}-src/{hash}/`.
+
+To allow multitenancy, the site configuration and services are not included with the source package. This means multiple site packages can make use of the same (or of course multiple) source installs.
+
 
 Site package
 ============
@@ -88,6 +94,20 @@ This debian package contains the configuration, static media, custom templates e
 
 They are owned by a user called `{software name}-{variant}` and a group of the same name with full access rights.
 
-Also, a set of convenience symbolic links will be created in `/src/{software name}-site/{variant}/`.
+Also, a set of convenience symbolic links will be created in `/src/{software name}-site/{variant}/`. These give you access to the logs, configuration, src, virtualenv, static media, dynamic media templates.
 
-The database name will be `{software}-{variant}`, but will also be set in the `DATABASE` environment variable so it's best that your django settings make use of this.
+This package also installs and configures the necessary services:
+ * Postgresql database. The database name will be `{software}-{variant}`, but will also be set in the `DATABASE` environment variable so it's best that your django settings make use of this.
+ * Queue server (eg rabbitmq, user/server added, service reloaded)
+ * Cache server (memcached, debian package as dependency)
+ * Celeryd workers (systemd script included, service started/restarted)
+ * gunicorn (systemd script included, service started/reloaded)
+ * nginx (debian package as dependency, config linked, service started/reloaded)
+
+A server utility for this site is included to query and control the various services. It is named after your app (`{software}-{variant}`) and placed in `/usr/bin`. It has the following command arguments:
+ * `status` quickly show the status of all services
+ * `reload` reload all services
+ * `restart` restart all services (including the database!)
+ * `start` try to start any stopped services
+ * `offline` replace site with maintenance page
+ * `online` replace maintenance page with site
