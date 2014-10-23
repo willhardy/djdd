@@ -39,7 +39,7 @@ Your code needs to define the following:
    - the version hash to be built
    - the build directory (see below for creating the build directory)
 
-To create a build directory run eg `django-deb-deploy --build-directory /path/to/build-dir/ --initialize git+http://server.com/git/repository --debian jessie`. This will:
+To create a build directory run eg `django-deb-deploy init --dir /path/to/build-dir/ --clone git+http://server.com/git/repository --debian jessie`. This will:
    * create a debbootstrap instance in the given directory
    * install any required packages
    * create the required system users and groups
@@ -47,7 +47,7 @@ To create a build directory run eg `django-deb-deploy --build-directory /path/to
 
 Not that the build machine must be the same architecture and use the same debian variant (`jessie` in the example) as the target system.
 
-To create the required packages run eg `django-deb-deploy --build-directory /path/to/build-dir --name mysoftware --variant berlin --version 1a2b3c4d --settings path-to-settings-module`. This will:
+To create the required packages run eg `django-deb-deploy build --dir /path/to/build-dir --name mysoftware --variant berlin --version 1a2b3c4d --settings path-to-settings-module`. This will:
    * Install any required debian packages [1]
    * Run `git fetch` on the repository
    * Checkout the requested version into its place
@@ -57,8 +57,6 @@ To create the required packages run eg `django-deb-deploy --build-directory /pat
    * Build the (variant's) site package
 
 .. [1] If no other builds are running there will be no issues, but if another build is running and upgrades or package uninstalls are required, then it will wait for the other package build to finish before starting.
-
-For convenience you can add `django_deb_deploy` to the `INSTALLED_PACKAGES` setting in your development settings and use `./manage.py deb_deploy` instead.
 
 
 virtualenv package
