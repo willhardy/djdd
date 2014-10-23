@@ -5,54 +5,66 @@ import click
 import os
 
 
-class BuildEnvironment(object):
-    def __init__(self, directory):
-        self.directory = directory
-
-pass_build_environment = click.make_pass_decorator(BuildEnvironment)
-
-
 @click.group()
-@click.option('--dir', metavar='PATH', envvar='DJDD_BUILD_DIRECTORY',
-              default='_build', help='directory for the debbootstrap instance',
-              type=click.Path(resolve_path=True, writable=True, file_okay=False))
-@click.pass_context
-def cli(ctx, dir):
+def cli():
     """ This is a tool to create .deb packages for deploying Django sites on
         production Debian systems.
     """
-    ctx.obj = BuildEnvironment(dir)
 
+def validate_directory_does_not_exist(ctx, param, value):
+    if os.path.exists(value):
+        dir = os.path.relpath(value)
+        raise click.BadParameter('Build directory "{}" already exists'.format(dir))
+
+
+################################################################################
+# INIT COMMAND
+################################################################################
 
 @cli.command()
-@click.option('--clone', metavar='REPOSITORY', multiple=True,
+@click.option('--name', help="Name for this build environment")
+@click.option('--dir', envvar='DJDD_BUILD_DIRECTORY', default='_djdd_build',
+                       help='directory for the debbootstrap instance', show_default=True,
+                       type=click.Path(resolve_path=True, writable=True, file_okay=False),
+                       callback=validate_directory_does_not_exist, metavar='PATH')
+@click.option('--clone', metavar='REPOSITORY', multiple=True, required=True,
                          help='URI of your source code respository for git to clone')
 @click.option('--suite', help="Name of the target Debian environment's"
-                              "suite (eg jessie)")
+                              "suite (eg jessie)", required=True)
 @click.option('--arch', help="Name of the target Debian environment's"
+                             "architecture (eg amd64)", required=True)
+@click.option('--mirror', help="Name of the target Debian environment's"
                              "architecture (eg amd64)")
-@pass_build_environment
-def init(build, clone, suite, arch):
+def init(name, dir, clone, suite, arch):
     """ Initialise a build environment, creating the debbootstrap area and
         cloning the given repository/-ies.
     """
-    dir = build.directory
-    #djdd.init(dir, clone, suite, arch)
+    djdd.initialize_build_directory(name, dir, suite, arch, clone)
+
+
+################################################################################
+# BUILD COMMAND
+################################################################################
 
 
 @cli.command()
+@click.option('--dir', envvar='DJDD_BUILD_DIRECTORY', default='_djdd_build',
+                       help='directory for the debbootstrap instance',
+                       type=click.Path(exists=True, resolve_path=True,
+                                            writable=True, file_okay=False),
+                       metavar='PATH')
 @click.option('--name', help='Short name of your software, '
-                     'please no spaces, hyphens, underscores etc')
+                        'please no spaces, hyphens, underscores etc')
 @click.option('--variant', help='optional variant for this build')
 @click.option('--version', help='version number to build')
 @click.option('--settings', help='django settings module to use')
 @click.option('--venv-depends', default="venv-debian-depends.txt",
-                help='debian-requirements.txt file for the virtualenv')
+                               help='debian-requirements.txt file for the virtualenv')
 @click.option('--src-depends', default="src-debian-depends.txt",
-                help='debian-requirements.txt file for the source')
-@pass_build_environment
-def build(build, name, variant, version, settings, venv_depends, src_depends):
-    dir = build.directory
+                               help='debian-requirements.txt file for the source')
+def build(dir, name, variant, version, settings, venv_depends, src_depends):
+    """ Build the required debian packages using the given build directory.
+    """
     #djdd.build_site(dir, name, variant, version, settings, venv_depends, src_depends)
 
 
