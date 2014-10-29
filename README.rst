@@ -14,12 +14,12 @@ For now, the following is assumed/configured:
 * A debian package for the version of your source code
 * A debian package for your site, which depends on the above packages and contains:
 
-   - nginx configuration
-   - systemd configuration for the site's process (gunicorn) and any celery
-     workers
-   - postinst script to ensure database, users etc. exist, to switch
-     running gunicorn process to new software version atomically, and to
-     optionally run migrate (default off!)
+  - nginx configuration
+  - systemd configuration for the site's process (gunicorn) and any celery
+    workers
+  - postinst script to ensure database, users etc. exist, to switch
+    running gunicorn process to new software version atomically, and to
+    optionally run migrate (default off!)
 
 A new package name is created for each possible virtualenv configuration and
 source code version, instead of incrementing the version number of a single
@@ -41,10 +41,10 @@ Your code needs to define the following:
 * src-debian-requirements.txt (required debian packages for src)
 * When running the script, you will need to provide arguments to communicate:
 
-   - the software's name (used in package and script names, keep it short, no spaces etc)
-   - the software's variant (optional, for multitenancy)
-   - the version hash to be built
-   - the build directory (see below for creating the build directory)
+  - the software's name (used in package and script names, keep it short, no spaces etc)
+  - the software's variant (optional, for multitenancy)
+  - the version hash to be built
+  - the build directory (see below for creating the build directory)
 
 To create a build directory run eg ``sudo django-deb-deploy create --dir /path/to/build-dir/``. This will:
 
@@ -61,7 +61,7 @@ Not that the build machine must be the same architecture and use the same debian
 
 To create the required packages run eg ``django-deb-deploy build mysoftware --dir /path/to/build-dir --variant berlin --version 1a2b3c4d --settings path-to-settings-module``. This will:
 
-* Install any required debian packages [1]
+* Install any required debian packages [1]_
 * Run ``git fetch`` on the repository
 * Checkout the requested version into its place
 * Build the requirements package if necessary (or wait for it to be built)
