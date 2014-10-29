@@ -2,6 +2,9 @@
 django-deb-deploy
 *****************
 
+**this is a work in progress, it is not yet completed. A working version
+should be released in the next week or two.**
+
 This is a tool to create .deb packages for deploying Django sites on
 production Debian systems.
 
@@ -10,6 +13,7 @@ For now, the following is assumed/configured:
 * A debian package for the virtualenv, created from the requirements.txt file
 * A debian package for the version of your source code
 * A debian package for your site, which depends on the above packages and contains:
+
    - nginx configuration
    - systemd configuration for the site's process (gunicorn) and any celery
      workers
@@ -36,6 +40,7 @@ Your code needs to define the following:
 * venv-debian-requirements.txt (required debian packages for virtualenv packages)
 * src-debian-requirements.txt (required debian packages for src)
 * When running the script, you will need to provide arguments to communicate:
+
    - the software's name (used in package and script names, keep it short, no spaces etc)
    - the software's variant (optional, for multitenancy)
    - the version hash to be built
