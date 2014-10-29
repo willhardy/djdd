@@ -1,6 +1,6 @@
-import re
-import ast
-from setuptools import setup
+# encoding: utf8
+
+from setuptools import setup, find_packages
 
 
 with open('djdd/VERSION', 'rb') as f:
@@ -13,7 +13,13 @@ setup(
     author_email='django@willhardy.com.au',
     version=version,
     url='http://github.com/willhardy/django-deb-deploy',
-    packages=['djdd'],
+    packages=find_packages(),
+    include_package_data=True,
+    install_requires=['click'],
+    entry_points='''
+        [console_scripts]
+        django-deb-deploy=djdd.ui:cli
+    ''',
     description='A tool for creating deploy debian packages for '
                 'django-based sites.',
     classifiers=[
