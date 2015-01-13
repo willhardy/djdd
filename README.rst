@@ -8,6 +8,29 @@ should be released in the next week or two.**
 This is a tool to create .deb packages for deploying Django sites on
 production Debian systems.
 
+Quick start
+===========
+
+Download and install django-deb-deploy:
+
+``pip install django-deb-deploy``
+
+... and install the required debian tools:
+
+``apt-get install debootstrap schroot``
+
+Now you can create a build build. This is a minimal debian system that will be similar to the eventual production environment, contained within the directory:
+
+``sudo django-deb-deploy create``
+
+In the build environment we can create builds for various software releases. Add one like this:
+
+``django-deb-deploy init mysoftware --clone git+http://server.com/git/repository``
+
+
+Overview
+========
+
 For now, the following is assumed/configured:
 
 * A debian package for the virtualenv, created from the requirements.txt file

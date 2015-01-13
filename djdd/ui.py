@@ -2,6 +2,7 @@
 import djdd
 import click
 import os
+import logging
 
 
 @click.group()
@@ -9,6 +10,7 @@ def cli():
     """ This is a tool to create .deb packages for deploying Django sites on
         production Debian systems.
     """
+    logging.basicConfig()
 
 
 ################################################################################

@@ -116,7 +116,13 @@ def install_build_environment(dir, debian_suite, debian_arch, debian_mirror=None
         directory={env.root_dir}
         groups={env.unix_group_name}
         root-groups={env.unix_group_name}
+        profile=djdd
     """
+    # Install a profile directory if it doesn't exist
+    if not os.path.exists(build_env.schroot_profile_dir):
+        profile_skel = os.path.join(os.path.dirname(__file__), 'templates', 'schroot-profile')
+        shutil.copytree(profile_skel, build_env.schroot_profile_dir)
+
     # Install the configuration
     schroot_config = SCHROOT_CONFIG_TEMPLATE.format(env=build_env).strip()
     with open(build_env.schroot_config_filename, 'w') as f:
@@ -201,6 +207,7 @@ class BuildEnvironment(object):
     unix_group_name = NAMESPACE
     build_group = NAMESPACE
     build_user = NAMESPACE
+    schroot_profile_dir = '/etc/schroot/djdd'
 
     def __init__(self, dir):
         self.dir = dir
@@ -271,7 +278,7 @@ class BuildEnvironment(object):
         """
         self.check_configuration_linked()
         chroot_session = 'session:{}'.format(subprocess.check_output(['schroot', '--chroot', self.name, '--begin-session']).decode("ascii").strip())
-        cmd_schroot = ['schroot', '--chroot', chroot_session, '--run-session']
+        cmd_schroot = ['schroot', '--chroot', chroot_session, '--run-session', '--directory', '/']
         def call(cmd, shell=False, root=False):
             extra_args = []
             if root:
