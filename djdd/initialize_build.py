@@ -156,9 +156,9 @@ def install_build_environment(dir, debian_suite, debian_arch, debian_mirror=None
 
         # Add user for building
         call('addgroup {env.build_group}'.format(env=build_env), shell=True, root=True)
-        call('adduser {env.build_user} {env.build_group}'.format(env=build_env), shell=True, root=True)
         call('adduser --system --quiet --ingroup "{env.build_group}" '
              '--gecos "DjDD Build user" "{env.build_user}"'.format(env=build_env), shell=True, root=True)
+        call('adduser {env.build_user} {env.build_group}'.format(env=build_env), shell=True, root=True)
 
 
 def initialize_build(dir, name, repositories):
@@ -270,7 +270,7 @@ class BuildEnvironment(object):
             This takes care of subprocess calls and chroot session management.
         """
         self.check_configuration_linked()
-        chroot_session = 'session:'+subprocess.check_output(['schroot', '--chroot', self.name, '--begin-session']).strip()
+        chroot_session = 'session:{}'.format(subprocess.check_output(['schroot', '--chroot', self.name, '--begin-session']).decode("ascii").strip())
         cmd_schroot = ['schroot', '--chroot', chroot_session, '--run-session']
         def call(cmd, shell=False, root=False):
             extra_args = []
