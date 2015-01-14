@@ -25,7 +25,7 @@ Now you can create a build build. This is a minimal debian system that will be s
 
 In the build environment we can create builds for various software releases. Add one like this:
 
-``django-deb-deploy init mysoftware --clone git+http://server.com/git/repository``
+``django-deb-deploy add mysoftware --clone git+http://server.com/git/repository``
 
 
 Overview
@@ -76,7 +76,7 @@ To create a build directory run eg ``sudo django-deb-deploy create --dir /path/t
 * install schroot configuration to allow normal users to use the bootstrapped debian instance
 * install any extra required debian packages for building
 
-Then run ``django-deb-deploy init mysoftware --dir /path/to/build-dir/ --clone git+http://server.com/git/repository``. This will:
+Then run ``django-deb-deploy add mysoftware --dir /path/to/build-dir/ --clone git+http://server.com/git/repository``. This will:
 
 * clone your source code repository
 

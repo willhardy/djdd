@@ -46,7 +46,7 @@ def uninstall(dir):
 
 
 ################################################################################
-# INIT COMMAND
+# ADD COMMAND
 ################################################################################
 
 @cli.command()
@@ -57,11 +57,14 @@ def uninstall(dir):
                        metavar='PATH')
 @click.option('--clone', metavar='REPOSITORY', multiple=True, required=True, prompt="URI for Git respository to clone",
                          help='URI of your source code respository for git to clone')
-def init(name, dir, clone):
-    """ Initialise a new build for the software of the given name,
+@click.option('--identity', default=None, show_default=True,
+                       help='SSH private key (NB will be copied to build directory)',
+                       type=click.Path(resolve_path=True), metavar='ID_FILE')
+def add(name, dir, clone, identity):
+    """ Add a new build area for the software of the given name,
         cloning the given repository URI(s).
     """
-    djdd.initialize_build(dir, name, clone)
+    djdd.add_software(dir, name, clone, identity)
 
 
 ################################################################################

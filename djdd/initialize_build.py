@@ -5,6 +5,8 @@ import errno
 import random
 import sys
 import grp
+import functools
+import shutil
 import contextlib
 import subprocess
 import logging
@@ -167,7 +169,7 @@ def install_build_environment(dir, debian_suite, debian_arch, debian_mirror=None
         call('adduser {env.build_user} {env.build_group}'.format(env=build_env), shell=True, root=True)
 
 
-def initialize_build(dir, name, repositories):
+def add_software(dir, name, repositories, identity):
     """ Once schroot has been configured, a regular user can initialise the directory."""
     build_env = BuildEnvironment(dir)
 
@@ -178,16 +180,38 @@ def initialize_build(dir, name, repositories):
         logging.error("Your user is not a member of the {group} group.".format(user=build_env.unix_group_name))
         sys.exit(6)
 
+    internal_identity_dir = '/var/lib/{namespace}/{name}/ssh/'.format(namespace=NAMESPACE, name=name)
+    if identity is not None:
+        identity_filename = os.path.join(internal_identity_dir, 'id_rsa_custom')
+        ext_identity_filename = os.path.join(build_env.root_dir, identity_filename.lstrip("/"))
+        shutil.copyfile(identity, ext_identity_filename)
+        os.chmod(ext_identity_filename, 0o2700) # 700 == ug+rwx,o-rwx
+    else:
+        identity_filename = os.path.join(internal_identity_dir, 'id_rsa')
+
     # Create a directory for the builds
     internal_repository_dir = '/var/lib/{namespace}/{name}/repository/'.format(namespace=NAMESPACE, name=name)
     with build_env.chroot() as call:
-        call(["mkdir", "-p", internal_repository_dir])
-        call(["chown", ":{build_group}".format(build_env.build_group), internal_repository_dir])
-        call(["chmod", "g+rwX", internal_repository_dir])
+        call(["mkdir", "-p", internal_repository_dir], root=True)
+        call(["mkdir", "-p", internal_identity_dir], root=True)
+        call(["chown", ":{build_group}".format(build_group=build_env.build_group),
+                internal_repository_dir, internal_identity_dir], root=True)
+        call(["chmod", "g+rwX", internal_repository_dir, internal_identity_dir], root=True)
+
+        # If no identity, create one
+        if identity is None and not os.path.exists(os.path.join(build_env.root_dir, identity_filename.lstrip("/"))):
+            comment = u"djdd {}".format(name)
+            call(["ssh-keygen", "-t", "rsa", "-C", comment, "-N", "", "-q", "-f", identity_filename])#, capture_output=True)
+            print("Created SSH key:\n")
+            call(["cat", identity_filename])
+            print("\n")
+            raw_input("Add this key to the repository and press Enter to continue...")
 
         # Checkout the source code
         for repository in repositories:
-            call(["git", "clone", repository, internal_repository_dir, "--mirror", "--quiet"])
+            with build_env.sshagent(call, identity_filename) as ssh_call:
+                # No point in being quiet, let the user see what's happening
+                ssh_call(["git", "clone", repository, internal_repository_dir, "--mirror"])  #, "--quiet"])
 
 
 ################################################################################
@@ -279,16 +303,58 @@ class BuildEnvironment(object):
         self.check_configuration_linked()
         chroot_session = 'session:{}'.format(subprocess.check_output(['schroot', '--chroot', self.name, '--begin-session']).decode("ascii").strip())
         cmd_schroot = ['schroot', '--chroot', chroot_session, '--run-session', '--directory', '/']
-        def call(cmd, shell=False, root=False):
+        def call(cmd, shell=False, root=False, capture_output=False, env=None):
+            if capture_output:
+                subprocess_fn = functools.partial(subprocess.check_output, stderr=subprocess.STDOUT)
+            else:
+                subprocess_fn = subprocess.call
             extra_args = []
             if root:
                 extra_args.extend(["--user", "root"])
+            if env:
+                extra_args.append("-p")
             extra_args.append("--")
             if shell:
                 escaped_cmd = cmd.replace("'", "'\''")
                 full_cmd = ' '.join(cmd_schroot + extra_args) + ' /bin/sh -c \'{}\''.format(cmd)
             else:
                 full_cmd = cmd_schroot + extra_args + cmd
-            subprocess.call(full_cmd, shell=shell)
-        yield call
-        subprocess.call(['schroot', '--chroot', chroot_session, '--end-session'])
+            return subprocess_fn(full_cmd, shell=shell, env=env)
+
+        try:
+            yield call
+        except:
+            raise
+        finally:
+            subprocess.call(['schroot', '--chroot', chroot_session, '--end-session', '--force'])
+
+    @contextlib.contextmanager
+    def sshagent(self, call_fn, identity_file):
+        # SSH calls want this to exist, so make sure it does
+        call_fn(['mkdir', '-p', os.environ['HOME']], root=True)
+        call_fn(['chown', os.environ['USER'], os.environ['HOME']], root=True)
+
+        output = call_fn(['ssh-agent'], capture_output=True)
+        SSH_AUTH_SOCK = output.splitlines()[0].split(";", 1)[0].split("=", 1)[1]
+        SSH_AGENT_PID = output.splitlines()[1].split(";", 1)[0].split("=", 1)[1]
+        preserve_envs = ['HOME', 'LOGNAME', 'USER']
+        new_env = {k: os.environ[k] for k in preserve_envs}
+        new_env['SSH_AUTH_SOCK'] = SSH_AUTH_SOCK
+        new_env['SSH_AGENT_PID'] = SSH_AGENT_PID
+        def ssh_call(cmd, shell=False, root=False, capture_output=False, env=None):
+            if env is not None:
+                _env = env.copy()
+                _env['SSH_AUTH_SOCK'] = SSH_AUTH_SOCK
+                _env['SSH_AGENT_PID'] = SSH_AGENT_PID
+            else:
+                _env = new_env
+
+            return call_fn(cmd, shell=shell, root=root, capture_output=capture_output, env=_env)
+
+        ssh_call(['ssh-add', identity_file], capture_output=True, env=new_env)
+        try:
+            yield ssh_call
+        except:
+            raise
+        finally:
+            call_fn(['kill', SSH_AGENT_PID])
