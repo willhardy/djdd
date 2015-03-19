@@ -161,6 +161,6 @@ class BuildEnvironment(object):
         except:
             raise
         finally:
-            call_fn(['kill', SSH_AGENT_PID])
+            subprocess.call(['/bin/kill', SSH_AGENT_PID])
             # Re-add the group permissions to the identity file
             os.chmod(self.ext_filename(identity_file), 0o2770) # 770 == ug+rwx,o-rwx

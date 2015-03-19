@@ -39,7 +39,7 @@ def add_software(dir, name, repositories, identity):
             comment = u"djdd {}".format(name)
             call(["ssh-keygen", "-t", "rsa", "-C", comment, "-N", "", "-q", "-f", identity_filename])#, capture_output=True)
             print("Created SSH key:\n")
-            call(["cat", identity_filename])
+            call(["cat", identity_filename + ".pub"])
             print("\n")
             raw_input("Add this key to the repository and press Enter to continue...")
 
