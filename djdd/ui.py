@@ -1,8 +1,8 @@
 # encoding: utf8
 import djdd
 import click
-import os
 import logging
+from .constants import DEFAULT_BUILD_DIR
 
 
 @click.group()
@@ -14,11 +14,11 @@ def cli():
 
 
 ################################################################################
-# NEW COMMAND
+# INIT COMMAND
 ################################################################################
 
 @cli.command()
-@click.option('--dir', envvar='DJDD_BUILD_DIRECTORY', default='_djdd_build', required=True,
+@click.option('--dir', envvar='DJDD_BUILD_DIRECTORY', default=DEFAULT_BUILD_DIR, required=True,
                        help='directory for the debbootstrap instance', show_default=True,
                        type=click.Path(resolve_path=True, writable=True, file_okay=False),
                        metavar='PATH')
@@ -27,15 +27,19 @@ def cli():
 @click.option('--arch', help="Name of the target Debian environment's architecture",
                                 default="amd64", required=True, prompt="Debian arch")
 @click.option('--mirror', help="Use a preferred (local) Debian mirror")
-def create(dir, suite, arch, mirror):
+@click.option('--tar', help="Use a the given debootstrap package tarball")
+@click.option('--db', envvar='postgres://username:password@server:port/name',
+                        help="Connect to the given external database for storing variant configuration. "
+                              "By default, a private database is created on the build server.")
+def init(dir, suite, arch, mirror, tar, db):
     """ Creates a new build environment, building a clean debian machine and
         setting up schroot for non-root access.
     """
-    djdd.install_build_environment(dir, suite, arch, mirror)
+    djdd.install_build_environment(dir, suite, arch, mirror, tar, db)
 
 
 @cli.command()
-@click.option('--dir', envvar='DJDD_BUILD_DIRECTORY', default='_djdd_build', required=True,
+@click.option('--dir', envvar='DJDD_BUILD_DIRECTORY', default=DEFAULT_BUILD_DIR, required=True,
                        help='directory for the debbootstrap instance', show_default=True,
                        type=click.Path(resolve_path=True, file_okay=False),
                        metavar='PATH')
@@ -46,12 +50,12 @@ def uninstall(dir):
 
 
 ################################################################################
-# ADD COMMAND
+# SRC COMMAND
 ################################################################################
 
 @cli.command()
 @click.argument('name', required=True)
-@click.option('--dir', envvar='DJDD_BUILD_DIRECTORY', default='_djdd_build', required=True,
+@click.option('--dir', envvar='DJDD_BUILD_DIRECTORY', default=DEFAULT_BUILD_DIR, required=True,
                        help='directory for the debbootstrap instance', show_default=True,
                        type=click.Path(resolve_path=True, file_okay=False),
                        metavar='PATH')
@@ -60,11 +64,31 @@ def uninstall(dir):
 @click.option('--identity', default=None, show_default=True,
                        help='SSH private key (NB will be copied to build directory)',
                        type=click.Path(resolve_path=True), metavar='ID_FILE')
-def add(name, dir, clone, identity):
+def src(name, dir, clone, identity):
     """ Add a new build area for the software of the given name,
         cloning the given repository URI(s).
     """
     djdd.add_software(dir, name, clone, identity)
+
+
+################################################################################
+# VARIANT COMMAND
+################################################################################
+
+@cli.command()
+@click.argument('name', required=True)
+@click.option('--dir', envvar='DJDD_BUILD_DIRECTORY', default=DEFAULT_BUILD_DIR, required=True,
+                       help='directory for the debbootstrap instance', show_default=True,
+                       type=click.Path(resolve_path=True, file_okay=False),
+                       metavar='PATH')
+@click.option('--branch', metavar='REPOSITORY:BRANCH', multiple=True,
+                          prompt="Use a special branch if necessary",
+                          help='URI of your source code respository for git to clone')
+def variant(name, dir, branch):
+    """ Add a new build area for the software of the given name,
+        cloning the given repository URI(s).
+    """
+    djdd.add_variant(dir, name, branch)
 
 
 ################################################################################
@@ -73,7 +97,8 @@ def add(name, dir, clone, identity):
 
 
 @cli.command()
-@click.option('--dir', envvar='DJDD_BUILD_DIRECTORY', default='_djdd_build',
+@click.argument('software', required=True)
+@click.option('--dir', envvar='DJDD_BUILD_DIRECTORY', default=DEFAULT_BUILD_DIR,
                        help='directory for the debbootstrap instance',
                        type=click.Path(exists=True, resolve_path=True,
                                             writable=True, file_okay=False),
@@ -85,7 +110,7 @@ def add(name, dir, clone, identity):
                                help='debian-requirements.txt file for the virtualenv')
 @click.option('--src-depends', default="src-debian-depends.txt",
                                help='debian-requirements.txt file for the source')
-def build(dir, variant, version, settings, venv_depends, src_depends):
+def build(dir, software, variant, version, settings, venv_depends, src_depends):
     """ Build the required debian packages using the given build environment.
     """
-    #djdd.build_site(dir, variant, version, settings, venv_depends, src_depends)
+    #djdd.build_site(dir, software, variant, version, settings, venv_depends, src_depends)

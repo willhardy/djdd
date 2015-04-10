@@ -1,24 +1,119 @@
 # encoding: utf8
 import os
+import tempfile
 import errno
 import sys
 import grp
-import shutil
 import subprocess
 
-from .base import BuildEnvironment, logger
+from djdd.base import BuildEnvironment, logger, sudo
+from djdd import constants
 
 
-# These packages will be installed in the build environment
-# XXX Eventually, people are going to want to choose their own version of python/pip/virtualenv
-DJDD_DEPENDENCIES = [ 'locales', 'python-pip', 'python-virtualenv', 'git-buildpackage', 'debhelper', 'build-essential', 'git', 'git-core']
+# TODO: If something fails during init, break off
 
+
+def install_build_environment(dir, debian_suite, debian_arch, debian_mirror=None, tar=None, variant_database=None):
+    """ Creates a new build directory
+        The following aspects require root privileges:
+            * debootstrap
+            * schroot config installation
+    """
+    build_env = BuildEnvironment(dir, variant_database)
+
+    # Check that debootstrap and schroot is installed
+    REQUIRED_PACKAGES = {
+        'debootstrap': '/usr/sbin/debootstrap',
+        'schroot': '/usr/bin/schroot',
+            }
+    missing = [name for name, key_file in REQUIRED_PACKAGES.items()
+                    if not os.path.exists(key_file)]
+    if missing:
+        logger.error("Please install the following required packages:\n"
+                     "apt-get install {}".format(" ".join(missing)))
+        sys.exit(4)
+
+    # Make sure the djdd group exists
+    try:
+        grp.getgrnam(build_env.unix_group_name).gr_gid
+    except KeyError:
+        sudo(['addgroup', '--system', build_env.unix_group_name])
+        logger.info('Group "{}" created for accessing this build environment'.format(build_env.unix_group_name))
+
+    # Create the directories with djdd group write permissions
+    if not os.path.lexists(build_env.dir):
+        sudo(['mkdir', '-m', '04770', '-p', build_env.dir], user="root", group=build_env.unix_group_name)
+    if not os.path.lexists(build_env.log_dir):
+        os.makedirs(build_env.log_dir)
+    if not os.path.lexists(build_env.root_dir):
+        os.makedirs(build_env.root_dir)
+
+    # Install our chroot in global schroot config to allow normal users to chroot
+    # Whitespace will eventually be stripped from each line
+    SCHROOT_CONFIG_TEMPLATE = """
+        [{env.name}]
+        description=DjDD build environment
+        type=directory
+        directory={env.root_dir}
+        groups={env.unix_group_name}
+        root-groups={env.unix_group_name}
+        profile=djdd
+    """
+    # Install a profile directory if it doesn't exist
+    if not os.path.exists(build_env.schroot_profile_dir):
+        profile_skel = os.path.join(os.path.dirname(__file__), 'templates', 'schroot-profile')
+        sudo(['cp', '-R', profile_skel, build_env.schroot_profile_dir], user='root', group=build_env.unix_group_name)
+
+    # Install the configuration
+    schroot_config = SCHROOT_CONFIG_TEMPLATE.format(env=build_env).strip()
+    with tempfile.NamedTemporaryFile() as f:
+        # NB schroot does not like whitespace
+        for line in schroot_config.splitlines():
+            f.write(line.lstrip()+"\n")
+        f.flush()
+        os.chmod(f.name, 0o664)
+        # Move into place (as root)
+        sudo(['cp', f.name, build_env.schroot_config_filename])
+
+    # Put a symlink in the build directory so that future calls can find it
+    if not build_env.has_config_link:
+        os.symlink(build_env.schroot_config_filename, build_env.schroot_config_link)
+
+    # Create variant database if necessary
+    build_env.create_variant_database()
+    return
+
+    # Create the debootstrap
+    cmd_debootstrap = ['/usr/sbin/debootstrap', '--variant=minbase', '--arch', debian_arch]
+    if tar is not None:
+        tar = os.path.abspath(tar)
+        cmd_debootstrap.extend(["--unpack-tarball", tar])
+    cmd_debootstrap.extend([debian_suite, build_env.root_dir])
+    if debian_mirror is not None:
+        cmd_debootstrap.append(debian_mirror)
+    sudo(cmd_debootstrap)
+
+    # Install our required packages for building (eg git, virtualenv, debhelper etc)
+    with build_env.chroot() as call:
+        call('echo "exit 0" > /sbin/start-stop-daemon', shell=True, root=True)
+        call('echo "en_US ISO-8859-1\nen_US.UTF-8 UTF-8" > /etc/locale.gen', shell=True, root=True)
+        # Install anything we need
+        if debian_mirror is not None:
+            call('echo "deb {} {} main" > /etc/apt/sources.list'.format(debian_mirror, debian_suite), shell=True)
+        call('apt-get update', shell=True, root=True)
+        call(['apt-get', 'install', '--assume-yes'] + constants.DJDD_DEPENDENCIES, root=True)
+
+        # Add user for building
+        call('addgroup {env.build_group}'.format(env=build_env), shell=True, root=True)
+        call('adduser --system --quiet --ingroup "{env.build_group}" '
+             '--gecos "DjDD Build user" "{env.build_user}"'.format(env=build_env), shell=True, root=True)
+        call('adduser {env.build_user} {env.build_group}'.format(env=build_env), shell=True, root=True)
 
 
 def uninstall_build_environment(dir):
     """ Uninstalls the configuration with that name.
-        This probably needs to be run as root.
     """
+    # TODO This currently needs to be run as root, change to sudo
     build_env = BuildEnvironment(dir)
 
     # End all open sessions
@@ -53,110 +148,3 @@ def uninstall_build_environment(dir):
     # We could remove the group if there are no more registered environments with this group name
     # but because we don't delete the directories, we won't remove the group
     logger.info("Uninstalled this build directory, you may now delete it.")
-
-
-def install_build_environment(dir, debian_suite, debian_arch, debian_mirror=None):
-    """ Creates a new build directory (run as root).
-        The following aspects require root privileges:
-            * debootstrap
-            * schroot config installation
-    """
-    build_env = BuildEnvironment(dir)
-
-    # Check that debootstrap and schroot is installed
-    REQUIRED_PACKAGES = {
-        'debootstrap': '/usr/sbin/debootstrap',
-        'schroot': '/usr/bin/schroot',
-            }
-    missing = [name for name, key_file in REQUIRED_PACKAGES.items()
-                    if not os.path.exists(key_file)]
-    if missing:
-        logger.error("Please install the following required packages:\n"
-                     "apt-get install {}".format(" ".join(missing)))
-        sys.exit(4)
-
-    # Check early if there are obvious permissions problems, this should be run by root
-    if not os.access(os.path.dirname(build_env.schroot_config_filename), os.W_OK):
-        logger.error("Do not have permission to install schroot configuration. Please run as root.")
-        sys.exit(3)
-
-    # Make sure the djdd group exists
-    try:
-        gid_djdd = grp.getgrnam(build_env.unix_group_name).gr_gid
-    except KeyError:
-        subprocess.call(['addgroup', '--system', build_env.unix_group_name])
-        logger.info('Group "{}" created for accessing this build environment'.format(build_env.unix_group_name))
-        gid_djdd = grp.getgrnam(build_env.unix_group_name).gr_gid
-
-    # Create the directories with djdd group write permissions
-    if not os.path.lexists(build_env.dir):
-        os.makedirs(build_env.dir)
-        os.chown(build_env.dir, build_env.dir_parent_uid, gid_djdd)
-        os.chmod(build_env.dir, 0o2770) # 770 == ug+rwx,o-rwx
-    if not os.path.lexists(build_env.log_dir):
-        os.makedirs(build_env.log_dir)
-        os.chown(build_env.log_dir, build_env.dir_parent_uid, gid_djdd)
-        #os.chmod(build_env.log_dir, 0o2770)
-    if not os.path.lexists(build_env.root_dir):
-        os.makedirs(build_env.root_dir)
-        os.chown(build_env.root_dir, build_env.dir_parent_uid, gid_djdd)
-        #os.chmod(build_env.root_dir, 0o2770)
-
-    # Install our chroot in global schroot config to allow normal users to chroot
-    # Whitespace will eventually be stripped from each line
-    SCHROOT_CONFIG_TEMPLATE = """
-        [{env.name}]
-        description=DjDD build environment
-        type=directory
-        directory={env.root_dir}
-        groups={env.unix_group_name}
-        root-groups={env.unix_group_name}
-        profile=djdd
-    """
-    # Install a profile directory if it doesn't exist
-    if not os.path.exists(build_env.schroot_profile_dir):
-        profile_skel = os.path.join(os.path.dirname(__file__), 'templates', 'schroot-profile')
-        shutil.copytree(profile_skel, build_env.schroot_profile_dir)
-
-    # Install the configuration
-    schroot_config = SCHROOT_CONFIG_TEMPLATE.format(env=build_env).strip()
-    with open(build_env.schroot_config_filename, 'w') as f:
-        # schroot does not like whitespace
-        for line in schroot_config.splitlines():
-            f.write(line.lstrip()+"\n")
-
-    # Put a symlink in the build directory so that future calls can find it
-    if not build_env.has_config_link:
-        os.symlink(build_env.schroot_config_filename, build_env.schroot_config_link)
-
-    # Create the debootstrap
-    cmd_debootstrap = ['/usr/sbin/debootstrap', '--variant=minbase', '--arch', debian_arch, debian_suite, build_env.root_dir]
-    if debian_mirror is not None:
-        cmd_debootstrap.append(debian_mirror)
-    subprocess.call(cmd_debootstrap)
-
-    # Tidy up some aspects of the system (as root)
-    if debian_mirror is not None:
-        sources_list = os.path.join(build_env.root_dir, "etc/apt/sources.list")
-        with open(sources_list, 'w') as f:
-            f.write("deb {} {} main\n".format(debian_mirror, debian_suite))
-        # This is the chroot version of the above
-        #cmd = 'echo "deb {} {} main" > /etc/apt/sources.list'
-        #call(cmd.format(debian_mirror, debian_suite), shell=True)
-
-    # From here on out we don't need to be root.
-    # XXX we could potentially drop privileges to the user who owns the parent dir?
-
-    # Install our required packages for building (eg git, virtualenv, debhelper etc)
-    with build_env.chroot() as call:
-        call('echo "exit 0" > /sbin/start-stop-daemon', shell=True, root=True)
-        call('echo "en_US ISO-8859-1\nen_US.UTF-8 UTF-8" > /etc/locale.gen', shell=True, root=True)
-        # Install anything we need
-        call('apt-get update', shell=True, root=True)
-        call(['apt-get', 'install', '--assume-yes'] + DJDD_DEPENDENCIES, root=True)
-
-        # Add user for building
-        call('addgroup {env.build_group}'.format(env=build_env), shell=True, root=True)
-        call('adduser --system --quiet --ingroup "{env.build_group}" '
-             '--gecos "DjDD Build user" "{env.build_user}"'.format(env=build_env), shell=True, root=True)
-        call('adduser {env.build_user} {env.build_group}'.format(env=build_env), shell=True, root=True)

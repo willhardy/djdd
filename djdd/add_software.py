@@ -20,8 +20,6 @@ def add_software(dir, name, repositories, identity):
     identity_dir = '/var/lib/{namespace}/{name}/ssh/'.format(namespace=NAMESPACE, name=name)
     if identity is not None:
         identity_filename = os.path.join(identity_dir, 'id_rsa_custom')
-        shutil.copyfile(identity, build_env.ext_filename(identity_filename))
-        os.chmod(build_env.ext_filename(identity_filename), 0o2770) # 770 == ug+rwx,o-rwx
     else:
         identity_filename = os.path.join(identity_dir, 'id_rsa')
 
@@ -42,6 +40,9 @@ def add_software(dir, name, repositories, identity):
             call(["cat", identity_filename + ".pub"])
             print("\n")
             raw_input("Add this key to the repository and press Enter to continue...")
+        else:
+            shutil.copyfile(identity, build_env.ext_filename(identity_filename))
+            os.chmod(build_env.ext_filename(identity_filename), 0o2770) # 770 == ug+rwx,o-rwx
 
         # Checkout the source code
         for repository in repositories:
@@ -55,3 +56,7 @@ def add_software(dir, name, repositories, identity):
                     # No point in being quiet, let the user see what's happening
                     ssh_call(["git", "clone", repository, repository_dir, "--mirror"])  #, "--quiet"])
 
+
+def add_variant(dir, name, branch):
+    """ Once schroot has been configured, a regular user can initialise the directory."""
+    #build_env = BuildEnvironment(dir)

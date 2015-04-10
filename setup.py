@@ -15,7 +15,7 @@ setup(
     url='http://github.com/willhardy/django-deb-deploy',
     packages=find_packages(),
     include_package_data=True,
-    install_requires=['click'],
+    install_requires=['click', 'sh'],
     entry_points='''
         [console_scripts]
         django-deb-deploy=djdd.ui:cli

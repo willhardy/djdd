@@ -2,10 +2,9 @@
 django-deb-deploy
 *****************
 
-**this is a work in progress, it is not yet completed. A working version
-should be released in the next week or two.**
+**this is a work in progress, it is not yet production ready.**
 
-This is a tool to create .deb packages for deploying Django sites on
+This is a tool to create ``.deb`` packages for deploying Django sites on
 production Debian systems.
 
 Quick start
@@ -17,15 +16,30 @@ Download and install django-deb-deploy:
 
 ... and install the required debian tools:
 
-``apt-get install debootstrap schroot``
+``apt-get install debootstrap schroot sudo``
 
-Now you can create a build build. This is a minimal debian system that will be similar to the eventual production environment, contained within the directory:
+Now you can create a build build. This is a minimal debian system that will be similar to the eventual production environment, contained within the directory (The default directory is ``/var/lib/djdd/build/``). This may take some time, as a minimal Debian system is downloaded and installed.
 
-``sudo django-deb-deploy create``
+``django-deb-deploy init``
 
-In the build environment we can create builds for various software releases. Add one like this:
+In the build environment we can prepare a build for various software releases. Add one like this:
 
-``django-deb-deploy add mysoftware --clone git+http://server.com/git/repository``
+``django-deb-deploy src mysoftware --clone git+http://server.com/git/repository``
+
+And now we can build the build:
+
+``django-deb-deploy build mysoftware``
+
+The following files will appear in in the build directory under ``packages/``.
+ * ``mysoftware-site.deb``
+ * ``mysoftware-src-a1b2c3.deb``
+ * ``mysoftware-env-f9e8d7.deb``
+
+If you upload all of these packages to a debian repository, your target system can install the software using:
+
+``apt-get install mysoftware-site``
+
+Because the ``mysoftware-src-a1b2c3`` and ``mysoftware-env-f9e8d7`` packages are listed as depencencies for the ``mysoftware-site`` package, they will be automatically installed by ``apt-get``.
 
 
 Overview
@@ -69,20 +83,20 @@ Your code needs to define the following:
   - the version hash to be built
   - the build directory (see below for creating the build directory)
 
-To create a build directory run eg ``sudo django-deb-deploy create --dir /path/to/build-dir/``. This will:
+To create a build directory run eg ``django-deb-deploy init --dir /path/to/build-dir/``. This will:
 
 * create a debbootstrap instance in the given directory
 * create the required system users and groups
 * install schroot configuration to allow normal users to use the bootstrapped debian instance
 * install any extra required debian packages for building
 
-Then run ``django-deb-deploy add mysoftware --dir /path/to/build-dir/ --clone git+http://server.com/git/repository``. This will:
+Then run ``django-deb-deploy src mysoftware --dir /path/to/build-dir/ --clone git+http://server.com/git/repository``. This will:
 
 * clone your source code repository
 
 Not that the build machine must be the same architecture and use the same debian variant (``jessie`` in the example) as the target system.
 
-To create the required packages run eg ``django-deb-deploy build mysoftware --dir /path/to/build-dir --variant berlin --version 1a2b3c4d --settings path-to-settings-module``. This will:
+To build the required packages run eg ``django-deb-deploy build mysoftware --dir /path/to/build-dir --variant berlin --version 1a2b3c4d --settings path-to-settings-module``. This will:
 
 * Install any required debian packages [1]_
 * Run ``git fetch`` on the repository
@@ -93,6 +107,29 @@ To create the required packages run eg ``django-deb-deploy build mysoftware --di
 * Build the (variant's) site package
 
 .. [1] If no other builds are running there will be no issues, but if another build is running and upgrades or package uninstalls are required, then it will wait for the other package build to finish before starting.
+
+
+Multitenancy (Variants)
+=======================
+
+You can install multiple versions of the same software on a target system if you define variants.
+
+To add and build a variant:
+
+``django-deb-deploy variant mysoftware blue --branch repository:master``
+``django-deb-deploy variant mysoftware red --branch repository:master``
+``django-deb-deploy build mysoftware blue``
+``django-deb-deploy build mysoftware red``
+
+The following files will appear in in the build directory under ``packages/``.
+ * ``mysoftware-site-blue.deb``
+ * ``mysoftware-site-red.deb``
+ * ``mysoftware-src-a1b2c3.deb``
+ * ``mysoftware-env-f9e8d7.deb``
+
+If you upload all of these packages to a debian repository, your target system can install both versions by using:
+
+``apt-get update && apt-get install mysoftware-site-blue mysoftware-site-red``
 
 
 virtualenv package
