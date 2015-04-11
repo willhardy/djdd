@@ -64,50 +64,54 @@ def install_build_environment(dir, debian_suite, debian_arch, debian_mirror=None
         profile_skel = os.path.join(os.path.dirname(__file__), 'templates', 'schroot-profile')
         sudo(['cp', '-R', profile_skel, build_env.schroot_profile_dir], user='root', group=build_env.unix_group_name)
 
-    # Install the configuration
-    schroot_config = SCHROOT_CONFIG_TEMPLATE.format(env=build_env).strip()
-    with tempfile.NamedTemporaryFile() as f:
-        # NB schroot does not like whitespace
-        for line in schroot_config.splitlines():
-            f.write(line.lstrip()+"\n")
-        f.flush()
-        os.chmod(f.name, 0o664)
-        # Move into place (as root)
-        sudo(['cp', f.name, build_env.schroot_config_filename])
-
     # Put a symlink in the build directory so that future calls can find it
     if not build_env.has_config_link:
+        # Install the configuration
+        schroot_config = SCHROOT_CONFIG_TEMPLATE.format(env=build_env).strip()
+        with tempfile.NamedTemporaryFile() as f:
+            # NB schroot does not like whitespace
+            for line in schroot_config.splitlines():
+                f.write(line.lstrip()+"\n")
+            f.flush()
+            os.chmod(f.name, 0o664)
+            # Move into place (as root)
+            sudo(['cp', f.name, build_env.schroot_config_filename])
+
         os.symlink(build_env.schroot_config_filename, build_env.schroot_config_link)
+
+    if not os.path.exists(build_env.debootstrap_complete):
+        # Create the debootstrap
+        cmd_debootstrap = ['/usr/sbin/debootstrap', '--variant=minbase', '--arch', debian_arch]
+        if tar is not None:
+            tar = os.path.abspath(tar)
+            cmd_debootstrap.extend(["--unpack-tarball", tar])
+        cmd_debootstrap.extend([debian_suite, build_env.root_dir])
+        if debian_mirror is not None:
+            cmd_debootstrap.append(debian_mirror)
+        sudo(cmd_debootstrap)
+
+        # Install our required packages for building (eg git, virtualenv, debhelper etc)
+        with build_env.chroot() as call:
+            call('echo "exit 0" > /sbin/start-stop-daemon', shell=True, root=True)
+            call('echo "en_US ISO-8859-1\nen_US.UTF-8 UTF-8" > /etc/locale.gen', shell=True, root=True)
+            # Install anything we need
+            if debian_mirror is not None:
+                call('echo "deb {} {} main" > /etc/apt/sources.list'.format(debian_mirror, debian_suite), shell=True)
+            call('apt-get update', shell=True, root=True)
+            call(['apt-get', 'install', '--assume-yes'] + constants.DJDD_DEPENDENCIES, root=True)
+
+            # Add user for building
+            call('addgroup {env.build_group}'.format(env=build_env), shell=True, root=True)
+            call('adduser --system --quiet --ingroup "{env.build_group}" '
+                 '--gecos "DjDD Build user" "{env.build_user}"'.format(env=build_env), shell=True, root=True)
+            call('adduser {env.build_user} {env.build_group}'.format(env=build_env), shell=True, root=True)
+
+        # Touch the marker file to signify that bootstrap was successfully completed
+        with open(build_env.debootstrap_complete, "w") as f:
+            pass
 
     # Create variant database if necessary
     build_env.create_variant_database()
-    return
-
-    # Create the debootstrap
-    cmd_debootstrap = ['/usr/sbin/debootstrap', '--variant=minbase', '--arch', debian_arch]
-    if tar is not None:
-        tar = os.path.abspath(tar)
-        cmd_debootstrap.extend(["--unpack-tarball", tar])
-    cmd_debootstrap.extend([debian_suite, build_env.root_dir])
-    if debian_mirror is not None:
-        cmd_debootstrap.append(debian_mirror)
-    sudo(cmd_debootstrap)
-
-    # Install our required packages for building (eg git, virtualenv, debhelper etc)
-    with build_env.chroot() as call:
-        call('echo "exit 0" > /sbin/start-stop-daemon', shell=True, root=True)
-        call('echo "en_US ISO-8859-1\nen_US.UTF-8 UTF-8" > /etc/locale.gen', shell=True, root=True)
-        # Install anything we need
-        if debian_mirror is not None:
-            call('echo "deb {} {} main" > /etc/apt/sources.list'.format(debian_mirror, debian_suite), shell=True)
-        call('apt-get update', shell=True, root=True)
-        call(['apt-get', 'install', '--assume-yes'] + constants.DJDD_DEPENDENCIES, root=True)
-
-        # Add user for building
-        call('addgroup {env.build_group}'.format(env=build_env), shell=True, root=True)
-        call('adduser --system --quiet --ingroup "{env.build_group}" '
-             '--gecos "DjDD Build user" "{env.build_user}"'.format(env=build_env), shell=True, root=True)
-        call('adduser {env.build_user} {env.build_group}'.format(env=build_env), shell=True, root=True)
 
 
 def uninstall_build_environment(dir):

@@ -7,6 +7,7 @@ import functools
 import contextlib
 import subprocess
 import psycopg2
+import collections
 
 from djdd import constants
 
@@ -17,6 +18,8 @@ logger = logging.getLogger(NAMESPACE)
 logging.basicConfig(level="DEBUG")
 
 urlparse.uses_netloc.append('postgres')
+
+DatabaseConnection = collections.namedtuple("DatabaseConnection", "user,host,port,password,database")
 
 
 ################################################################################
@@ -41,10 +44,12 @@ class BuildEnvironment(object):
     """ Object to provide information on and a little interaction with
         a given build directory.
     """
-
     SCHROOT_CONFIG_DIR = "/etc/schroot/chroot.d"
     RE_CONFIG_NAME = re.compile(r'^\[(\w+)\]$', re.MULTILINE)
     RE_CONFIG_DIRECTORY = re.compile(r"^directory=(.+)$", re.MULTILINE)
+
+    # Use the global variable for now
+    NAMESPACE = NAMESPACE
 
     # This might be configurable one day
     unix_group_name = NAMESPACE
@@ -56,6 +61,7 @@ class BuildEnvironment(object):
         self.dir = dir or constants.DEFAULT_BUILD_DIR
         self.schroot_config_link = os.path.join(self.dir, "schroot.conf")
         self.root_dir = os.path.join(self.dir, "debootstrap_root")
+        self.debootstrap_complete = os.path.join(self.dir, "debootstrap_complete")
         self.log_dir = os.path.join(self.dir, "logs")
 
         self.has_config_link = os.path.lexists(self.schroot_config_link)
@@ -65,7 +71,7 @@ class BuildEnvironment(object):
         self.name = None
 
         # Variant database
-        self.variant_database_uri = self.parse_database_uri(variant_database or constants.DEFAULT_DATABASE)
+        self.variant_database = self.parse_database_uri(variant_database or constants.DEFAULT_DATABASE)
 
         # If we have a symlink, we can use it to get the filename for the config
         if self.has_config_link:
@@ -92,7 +98,14 @@ class BuildEnvironment(object):
     def parse_database_uri(self, database):
         """ Parse and validate the database string.
         """
-        return urlparse.urlparse(database or constants.DEFAULT_DATABASE)
+        uri = urlparse.urlparse(database or constants.DEFAULT_DATABASE)
+        db_name = uri.path.strip("/")
+        if uri.scheme != "postgres":
+            return None
+        if not db_name:
+            return None
+        return DatabaseConnection(user=uri.username,
+                    host=uri.hostname, port=uri.port, password=uri.password, database=db_name)
 
     @property
     def conn(self):
@@ -104,48 +117,100 @@ class BuildEnvironment(object):
         except AttributeError:
             pass
 
-        uri = self.variant_database_uri
-        db_name = uri.path.strip("/")
-        if uri.scheme == "postgres":
-            self._conn = psycopg2.connect(database=db_name, host=uri.hostname, port=uri.port, user=uri.username, password=uri.password)
-            return self._conn
+        db = self.variant_database
+        self._conn = psycopg2.connect(database=db.database, host=db.host, port=db.port, user=db.user, password=db.password)
+        return self._conn
 
     def create_variant_database(self):
         """ Create a local database for storing decided variant information.
         """
         logger.debug("Creating varient database")
         # If it is a local database, create it
-        if self.variant_database_uri.hostname == "localhost":
-            db_name = self.variant_database_uri.path.strip("/")
+        if self.variant_database.host == "localhost":
             # create the postgres database if not exists
             # TODO User privileges?! Different owner?
-            sudo(['createdb', db_name, '-E', 'utf8', '-O', 'will'], user='postgres')
+            sudo(['createdb', self.variant_database.database, '-E', 'utf8', '-O', 'will'], user='postgres')
             # TODO If that doesn't work, tell the user what to run and exit
 
         # Create the tables we need, if needed
         query = """
         CREATE TABLE IF NOT EXISTS variant (
-             id integer PRIMARY KEY,
-             key character varying(50) UNIQUE NOT NULL,
+             -- software is only a name so far, avoid extra table with denormalised form
+             software character varying(50),
+             -- this is the key for each software
+             id integer,
+             key character varying(50) NOT NULL,
              name character varying(100) NOT NULL,
              subdomain character varying(50) UNIQUE NOT NULL,
              postgres_name character varying(50) UNIQUE NOT NULL,
              elasticsearch_name character varying(50) UNIQUE NOT NULL,
              redis_number integer UNIQUE NOT NULL,
-             gunicorn_port integer UNIQUE NOT NULL
+             gunicorn_port integer UNIQUE NOT NULL,
+             PRIMARY KEY (software, id),
+             UNIQUE (software, key)
         );
+        COMMIT;
         """
         logger.debug("Creating database tables")
         curs = self.conn.cursor()
         curs.execute(query)
-        if curs.statusmessage != "CREATE TABLE":
-            # TODO If that doesn't work, tell the user what to run and exit
+
+        if not self.variant_database_exists():
+            # TODO If that didn't work, tell the user what to run and exit
             logger.error("Create table failed!")
 
-    def get_variant_info(self, variant):
+    def list_variant_infos(self):
+        """ Get the variant information from the variant database for all variants.
+            Returns an iterable of dicts eg.
+            [{
+                'software': 'mysoftware',
+                'id': 1,
+                'key': 'berlin',
+                'name': 'Berlin',
+                'subdomain': 'berlin',
+                'postgres_name': 'berlin',
+                'elasticsearch_name': 'berlin',
+                'redis_number': 1,
+                'gunicorn_port': 4001,
+            }]
+        """
+        query = """
+                SELECT
+                    software, id, key, name, subdomain, postgres_name,
+                    elasticsearch_name, redis_number, gunicorn_port
+                FROM variant
+                ORDER BY key
+                """
+        curs = self.conn.cursor()
+        curs.execute(query)
+        results = curs.fetchall()
+        headers = ('software', 'id', 'key', 'name', 'subdomain', 'postgres_name', 'elasticsearch_name', 'redis_number', 'gunicorn_port')
+        for result in results:
+            yield dict(zip(headers, result))
+
+    def variant_database_exists(self):
+        """ Checks if we can connect to the db, the table exists, and we
+            have access to it.
+        """
+
+        query = """
+            SELECT EXISTS (
+               SELECT 1
+               FROM   information_schema.tables
+               WHERE  table_schema = 'public'
+               AND    table_name = 'variant'
+            );
+        """
+        curs = self.conn.cursor()
+        curs.execute(query)
+        result = curs.fetchone()[0]
+        return result
+
+    def get_variant_info(self, software, variant):
         """ Get the variant information from the variant database.
             Returns a dict eg.
             {
+                'software': 'mysoftware',
                 'id': 1,
                 'key': 'berlin',
                 'name': 'Berlin',
@@ -156,30 +221,32 @@ class BuildEnvironment(object):
                 'gunicorn_port': 4001,
             }
         """
-        query = """SELECT
-                    id, name, subdomain, postgres_name,
-                     elasticsearch_name, redis_number, gunicorn_port
+        query = """
+                SELECT
+                    software, id, name, subdomain, postgres_name,
+                    elasticsearch_name, redis_number, gunicorn_port
                 FROM variant
-                WHERE key = %s"""
+                WHERE software = %s AND key = %s
+                """
         curs = self.conn.cursor()
-        curs.execute(query, (variant,))
+        curs.execute(query, (software, variant,))
         results = curs.fetchone()
-        headers = ('id', 'name', 'subdomain', 'postgres_name', 'elasticsearch_name', 'redis_number', 'gunicorn_port')
+        headers = ('software', 'id', 'name', 'subdomain', 'postgres_name', 'elasticsearch_name', 'redis_number', 'gunicorn_port')
         return dict(zip(headers, results))
 
-    def set_variant_info(self, variant, info):
+    def set_variant_info(self, software, variant, info):
         """ Sets variant information in the variant datbase.
             info is a dict as provided by self.get_variant_info().
         """
         query = """INSERT INTO variant
-                    (id, key, name, subdomain, postgres_name,
+                    (software, id, key, name, subdomain, postgres_name,
                      elasticsearch_name, redis_number, gunicorn_port)
                 VALUES
-                    (%s, %s, %s, %s, %s,
+                    (%s, %s, %s, %s, %s, %s,
                      %s, %s, %s);
                 COMMIT;
                 """
-        vars =  (info["id"], variant, info["name"], info["subdomain"], info["postgres_name"],
+        vars =  (software, info["id"], variant, info["name"], info["subdomain"], info["postgres_name"],
                  info["elasticsearch_name"], info["redis_number"], info["gunicorn_port"])
         curs = self.conn.cursor()
         curs.execute(query, vars)

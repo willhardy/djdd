@@ -7,3 +7,4 @@ with open(version_file, 'rb') as f:
 
 from djdd.initialize_build import install_build_environment, uninstall_build_environment
 from djdd.add_software import add_software, add_variant
+from djdd.status import get_status

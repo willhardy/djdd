@@ -49,6 +49,38 @@ def uninstall(dir):
     djdd.uninstall_build_environment(dir)
 
 
+@cli.command()
+@click.option('--dir', envvar='DJDD_BUILD_DIRECTORY', default=DEFAULT_BUILD_DIR, required=True,
+                       help='directory for the debbootstrap instance', show_default=True,
+                       type=click.Path(resolve_path=True, writable=True, file_okay=False),
+                       metavar='PATH')
+@click.option('--db', envvar='postgres://username:password@server:port/name',
+                        help="Connect to the given external database for storing variant configuration. "
+                              "By default, a private database is created on the build server.")
+def status(dir, db):
+    """ Shows the current state of the build directory, listing any defined sources and variants.
+    """
+    status = djdd.get_status(dir, db)
+    if status.get('database'):
+        database = "postgres://{db.user}:XXXXX@{db.host}/{db.database}".format(db=status['database'])
+    else:
+        database = "invalid/unconfigured"
+
+    print
+    print u"BUILD ENVIRONMENT:"
+    print u"-" * 80
+    print u" Build directory: {}".format(status['root_dir'])
+    print u"          Status: {}".format(status['status'][1])
+    print u"        Database: {}".format(database)
+    print
+    for software, repositories in status['software'].items():
+        print u"SOFTWARE: {}".format(software)
+        print u"-" * 80
+        print u"  repositories: {}".format(", ".join(repositories))
+        print u"      variants: {}".format(", ".join(status['variants'].get(software, [])) or "None")
+    print
+
+
 ################################################################################
 # SRC COMMAND
 ################################################################################
