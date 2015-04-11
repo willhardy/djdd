@@ -74,16 +74,20 @@ def status(dir, db):
     print u"        Database: {}".format(database)
     print
     for software, repositories in status['software'].items():
+        variant_keys = [v['key'] for v in status['variants'].get(software, [])]
         print u"SOFTWARE: {}".format(software)
         print u"-" * 80
         print u"  repositories: {}".format(", ".join(repositories))
-        print u"      variants: {}".format(", ".join(status['variants'].get(software, [])) or "None")
+        print u"      variants: {}".format(", ".join(variant_keys) or "None")
     print
 
 
 ################################################################################
 # SRC COMMAND
 ################################################################################
+# TODO: Allow a default branch (ie HEAD) to be given
+#       This will do nothing else but change the HEAD on our local repository
+#       and can obviously be overridden.
 
 @cli.command()
 @click.argument('name', required=True)
@@ -108,19 +112,17 @@ def src(name, dir, clone, identity):
 ################################################################################
 
 @cli.command()
+@click.argument('software', required=True)
 @click.argument('name', required=True)
 @click.option('--dir', envvar='DJDD_BUILD_DIRECTORY', default=DEFAULT_BUILD_DIR, required=True,
                        help='directory for the debbootstrap instance', show_default=True,
                        type=click.Path(resolve_path=True, file_okay=False),
                        metavar='PATH')
-@click.option('--branch', metavar='REPOSITORY:BRANCH', multiple=True,
-                          prompt="Use a special branch if necessary",
-                          help='URI of your source code respository for git to clone')
-def variant(name, dir, branch):
+def variant(software, name, dir):
     """ Add a new build area for the software of the given name,
         cloning the given repository URI(s).
     """
-    djdd.add_variant(dir, name, branch)
+    djdd.add_variant(dir, software, name)
 
 
 ################################################################################
@@ -142,6 +144,10 @@ def variant(name, dir, branch):
                                help='debian-requirements.txt file for the virtualenv')
 @click.option('--src-depends', default="src-debian-depends.txt",
                                help='debian-requirements.txt file for the source')
+# The branch option would allow a special branch to be used instead of the default (eg master)
+#@click.option('--branch', metavar='REPOSITORY:BRANCH', multiple=True,
+#                          required=False,
+#                          help='URI of your source code respository for git to clone')
 def build(dir, software, variant, version, settings, venv_depends, src_depends):
     """ Build the required debian packages using the given build environment.
     """

@@ -55,8 +55,3 @@ def add_software(dir, name, repositories, identity):
                 with build_env.sshagent(call, identity_filename) as ssh_call:
                     # No point in being quiet, let the user see what's happening
                     ssh_call(["git", "clone", repository, repository_dir, "--mirror"])  #, "--quiet"])
-
-
-def add_variant(dir, name, branch):
-    """ Once schroot has been configured, a regular user can initialise the directory."""
-    #build_env = BuildEnvironment(dir)

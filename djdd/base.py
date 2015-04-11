@@ -133,12 +133,13 @@ class BuildEnvironment(object):
             # TODO If that doesn't work, tell the user what to run and exit
 
         # Create the tables we need, if needed
+        # 'id' is globally unique, so that eg port numbers are unique across
+        #      varants AND software titles.
+        # 'software' is only a name so far, avoid extra table with denormalised form
         query = """
         CREATE TABLE IF NOT EXISTS variant (
-             -- software is only a name so far, avoid extra table with denormalised form
+             id integer PRIMARY KEY,
              software character varying(50),
-             -- this is the key for each software
-             id integer,
              key character varying(50) NOT NULL,
              name character varying(100) NOT NULL,
              subdomain character varying(50) UNIQUE NOT NULL,
@@ -146,7 +147,6 @@ class BuildEnvironment(object):
              elasticsearch_name character varying(50) UNIQUE NOT NULL,
              redis_number integer UNIQUE NOT NULL,
              gunicorn_port integer UNIQUE NOT NULL,
-             PRIMARY KEY (software, id),
              UNIQUE (software, key)
         );
         COMMIT;
@@ -232,7 +232,8 @@ class BuildEnvironment(object):
         curs.execute(query, (software, variant,))
         results = curs.fetchone()
         headers = ('software', 'id', 'name', 'subdomain', 'postgres_name', 'elasticsearch_name', 'redis_number', 'gunicorn_port')
-        return dict(zip(headers, results))
+        if results:
+            return dict(zip(headers, results))
 
     def set_variant_info(self, software, variant, info):
         """ Sets variant information in the variant datbase.
@@ -259,6 +260,9 @@ class BuildEnvironment(object):
             your variant. This is only a possible variant ID; the eventual
             call to self.set_variant_info() might fail, so you would need to
             get a new variant ID and try again.
+
+            We could have a unique variant ID per software,
+            but we won't.
         """
         query = "SELECT MAX(id) from variant;"
         curs = self.conn.cursor()
