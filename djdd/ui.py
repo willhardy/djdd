@@ -78,20 +78,24 @@ def status(dir, db):
     with handle_errors():
         status = djdd.get_status(dir, db)
         database = format_database_connection(status.get('database'))
+        build_env_states, build_env_status_msg = status['status']
 
         print
         print u"BUILD ENVIRONMENT:"
         print u"-" * 80
         print u" Build directory: {}".format(status['root_dir'])
-        print u"          Status: {}".format(status['status'][1])
+        print u"          Status: {}".format(build_env_status_msg)
         print u"        Database: {}".format(database)
         print
         for software, repositories in status['software'].items():
-            variant_keys = [v['key'] for v in status['variants'].get(software, [])]
+            variant_keys = [v['key'] for v in status.get('variants', {}).get(software, [])]
             print u"SOFTWARE: {}".format(software)
             print u"-" * 80
             print u"  repositories: {}".format(", ".join(repositories))
-            print u"      variants: {}".format(", ".join(variant_keys) or "None")
+            if 'no-variant-db' in build_env_states:
+                print u"      variants: {}".format("Unknown")
+            else:
+                print u"      variants: {}".format(", ".join(variant_keys) or "None")
         print
 
 

@@ -129,8 +129,7 @@ class BuildEnvironment(object):
         try:
             self._conn = psycopg2.connect(database=db.database, host=db.host, port=db.port, user=db.user, password=db.password)
         except psycopg2.OperationalError:
-            msg = "Could not connect to database \"{}\"".format(format_database_connection(db))
-            raise exceptions.BuildEnvironmentError(msg, build_env=self)
+            raise exceptions.VariantDBConnectionError(format_database_connection(db), build_env=self)
         else:
             return self._conn
 
