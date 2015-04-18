@@ -1,8 +1,21 @@
 # encoding: utf8
 import djdd
+from djdd import exceptions
+from djdd.base import logger, format_database_connection
 import click
 import logging
+import contextlib
 from .constants import DEFAULT_BUILD_DIR
+
+
+@contextlib.contextmanager
+def handle_errors():
+    """ Context manager to catch any errors and present them nicely to the user.
+    """
+    try:
+        yield
+    except exceptions.BuildEnvironmentError, e:
+        logger.error(e.msg)
 
 
 @click.group()
@@ -35,7 +48,8 @@ def init(dir, suite, arch, mirror, tar, db):
     """ Creates a new build environment, building a clean debian machine and
         setting up schroot for non-root access.
     """
-    djdd.install_build_environment(dir, suite, arch, mirror, tar, db)
+    with handle_errors():
+        djdd.install_build_environment(dir, suite, arch, mirror, tar, db)
 
 
 @cli.command()
@@ -46,7 +60,8 @@ def init(dir, suite, arch, mirror, tar, db):
 def uninstall(dir):
     """ Removes the installed configuration for the given build environment.
     """
-    djdd.uninstall_build_environment(dir)
+    with handle_errors():
+        djdd.uninstall_build_environment(dir)
 
 
 @cli.command()
@@ -60,26 +75,24 @@ def uninstall(dir):
 def status(dir, db):
     """ Shows the current state of the build directory, listing any defined sources and variants.
     """
-    status = djdd.get_status(dir, db)
-    if status.get('database'):
-        database = "postgres://{db.user}:XXXXX@{db.host}/{db.database}".format(db=status['database'])
-    else:
-        database = "invalid/unconfigured"
+    with handle_errors():
+        status = djdd.get_status(dir, db)
+        database = format_database_connection(status.get('database'))
 
-    print
-    print u"BUILD ENVIRONMENT:"
-    print u"-" * 80
-    print u" Build directory: {}".format(status['root_dir'])
-    print u"          Status: {}".format(status['status'][1])
-    print u"        Database: {}".format(database)
-    print
-    for software, repositories in status['software'].items():
-        variant_keys = [v['key'] for v in status['variants'].get(software, [])]
-        print u"SOFTWARE: {}".format(software)
+        print
+        print u"BUILD ENVIRONMENT:"
         print u"-" * 80
-        print u"  repositories: {}".format(", ".join(repositories))
-        print u"      variants: {}".format(", ".join(variant_keys) or "None")
-    print
+        print u" Build directory: {}".format(status['root_dir'])
+        print u"          Status: {}".format(status['status'][1])
+        print u"        Database: {}".format(database)
+        print
+        for software, repositories in status['software'].items():
+            variant_keys = [v['key'] for v in status['variants'].get(software, [])]
+            print u"SOFTWARE: {}".format(software)
+            print u"-" * 80
+            print u"  repositories: {}".format(", ".join(repositories))
+            print u"      variants: {}".format(", ".join(variant_keys) or "None")
+        print
 
 
 ################################################################################
@@ -104,7 +117,8 @@ def src(name, dir, clone, identity):
     """ Add a new build area for the software of the given name,
         cloning the given repository URI(s).
     """
-    djdd.add_software(dir, name, clone, identity)
+    with handle_errors():
+        djdd.add_software(dir, name, clone, identity)
 
 
 ################################################################################
@@ -122,7 +136,8 @@ def variant(software, name, dir):
     """ Add a new build area for the software of the given name,
         cloning the given repository URI(s).
     """
-    djdd.add_variant(dir, software, name)
+    with handle_errors():
+        djdd.add_variant(dir, software, name)
 
 
 ################################################################################
@@ -151,4 +166,5 @@ def variant(software, name, dir):
 def build(dir, software, variant, version, settings, venv_depends, src_depends):
     """ Build the required debian packages using the given build environment.
     """
-    #djdd.build_site(dir, software, variant, version, settings, venv_depends, src_depends)
+    #with handle_errors():
+        #djdd.build_site(dir, software, variant, version, settings, venv_depends, src_depends)

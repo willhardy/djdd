@@ -10,6 +10,7 @@ import psycopg2
 import collections
 
 from djdd import constants
+from djdd import exceptions
 
 # We're going call our users/groups/directories/etc by this name
 NAMESPACE = "djdd"
@@ -37,7 +38,6 @@ def sudo(cmd, user=None, group=None):
     args += cmd
     print "SUDO call: {}".format(" ".join(args))
     subprocess.call(args)
-
 
 
 class BuildEnvironment(object):
@@ -98,14 +98,22 @@ class BuildEnvironment(object):
     def parse_database_uri(self, database):
         """ Parse and validate the database string.
         """
-        uri = urlparse.urlparse(database or constants.DEFAULT_DATABASE)
-        db_name = uri.path.strip("/")
-        if uri.scheme != "postgres":
-            return None
-        if not db_name:
-            return None
-        return DatabaseConnection(user=uri.username,
+        connection_string = database or constants.DEFAULT_DATABASE
+        try:
+            uri = urlparse.urlparse(connection_string)
+            db_name = uri.path.strip("/")
+            connection = DatabaseConnection(user=uri.username,
                     host=uri.hostname, port=uri.port, password=uri.password, database=db_name)
+        except ValueError, e:
+            msg = "Could not parse database connection string \"{}\":\n{}".format(connection_string, e)
+            raise exceptions.BuildEnvironmentError(msg, self)
+        if uri.scheme != "postgres":
+            msg = "Only postgres:// database connection strings are accepted, not \"{}\"".format(connection_string)
+            raise exceptions.BuildEnvironmentError(msg, self)
+        if not db_name:
+            msg = "No database name provided (as path) \"{}\"".format(connection_string)
+            raise exceptions.BuildEnvironmentError(msg, self)
+        return connection
 
     @property
     def conn(self):
@@ -118,19 +126,27 @@ class BuildEnvironment(object):
             pass
 
         db = self.variant_database
-        self._conn = psycopg2.connect(database=db.database, host=db.host, port=db.port, user=db.user, password=db.password)
-        return self._conn
+        try:
+            self._conn = psycopg2.connect(database=db.database, host=db.host, port=db.port, user=db.user, password=db.password)
+        except psycopg2.OperationalError:
+            msg = "Could not connect to database \"{}\"".format(format_database_connection(db))
+            raise exceptions.BuildEnvironmentError(msg, build_env=self)
+        else:
+            return self._conn
 
     def create_variant_database(self):
         """ Create a local database for storing decided variant information.
         """
         logger.debug("Creating varient database")
         # If it is a local database, create it
-        if self.variant_database.host == "localhost":
+        if self.variant_database.host in ("localhost", None):
             # create the postgres database if not exists
-            # TODO User privileges?! Different owner?
-            sudo(['createdb', self.variant_database.database, '-E', 'utf8', '-O', 'will'], user='postgres')
-            # TODO If that doesn't work, tell the user what to run and exit
+            db_name = self.variant_database.database
+            output = subprocess.check_output(['psql', '-l']).splitlines()
+            if not any(line.startswith(" {} ".format(db_name)) for line in output):
+                # TODO User privileges?! Different owner?
+                sudo(['createdb', db_name, '-E', 'utf8', '-O', 'will'], user='postgres')
+                # TODO If that doesn't work, tell the user what to run and exit
 
         # Create the tables we need, if needed
         # 'id' is globally unique, so that eg port numbers are unique across
@@ -223,7 +239,7 @@ class BuildEnvironment(object):
         """
         query = """
                 SELECT
-                    software, id, name, subdomain, postgres_name,
+                    software, id, key, name, subdomain, postgres_name,
                     elasticsearch_name, redis_number, gunicorn_port
                 FROM variant
                 WHERE software = %s AND key = %s
@@ -231,7 +247,7 @@ class BuildEnvironment(object):
         curs = self.conn.cursor()
         curs.execute(query, (software, variant,))
         results = curs.fetchone()
-        headers = ('software', 'id', 'name', 'subdomain', 'postgres_name', 'elasticsearch_name', 'redis_number', 'gunicorn_port')
+        headers = ('software', 'id', 'key', 'name', 'subdomain', 'postgres_name', 'elasticsearch_name', 'redis_number', 'gunicorn_port')
         if results:
             return dict(zip(headers, results))
 
@@ -366,3 +382,18 @@ class BuildEnvironment(object):
             subprocess.call(['/bin/kill', SSH_AGENT_PID])
             # Re-add the group permissions to the identity file
             os.chmod(self.ext_filename(identity_file), 0o2770) # 770 == ug+rwx,o-rwx
+
+
+def format_database_connection(db):
+    if db:
+        if db.user:
+            user = db.user + (":XXXXX" if db.password else "") + "@"
+        else:
+            user = ""
+        if db.port:
+            port = ":{}".format(db.port)
+        else:
+            port = ""
+        return "postgres://{user}{db.host}{port}/{db.database}".format(user=user, db=db, port=port)
+    else:
+        return "invalid/unconfigured"

@@ -1,4 +1,3 @@
-
 import os
 
 version_file = os.path.join(os.path.dirname(__file__), "VERSION")
